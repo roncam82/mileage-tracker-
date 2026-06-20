@@ -7,17 +7,24 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.room.Room
 import kotlinx.coroutines.launch
+import org.osmdroid.config.Configuration
+import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.util.GeoPoint
+import org.osmdroid.views.MapView
+import org.osmdroid.views.overlay.Polyline
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -28,7 +35,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        db = Room.databaseBuilder(applicationContext, AppDatabase::class.java, "trips.db").build()
+        db = Room.databaseBuilder(applicationContext, AppDatabase::class.java, "trips.db").fallbackToDestructiveMigration().build()
 
         requestPermissions()
         
@@ -46,7 +53,9 @@ class MainActivity : ComponentActivity() {
             Manifest.permission.ACCESS_FINE_LOCATION,
             Manifest.permission.ACCESS_COARSE_LOCATION,
             Manifest.permission.ACTIVITY_RECOGNITION,
-            Manifest.permission.POST_NOTIFICATIONS
+            Manifest.permission.POST_NOTIFICATIONS,
+            Manifest.permission.INTERNET,
+            Manifest.permission.ACCESS_NETWORK_STATE
         )
         val requestLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { }
         
@@ -59,7 +68,9 @@ class MainActivity : ComponentActivity() {
     @Composable
     fun AppContent() {
         val trips by db.tripDao().getAllTrips().collectAsState(initial = emptyList())
+        var selectedTrip by remember { mutableStateOf<Trip?>(null) }
         var exportPath by remember { mutableStateOf<String?>(null) }
+        val context = LocalContext.current
 
         Column(modifier = Modifier.padding(16.dp)) {
             Text("Mileage Tracker", style = MaterialTheme.typography.headlineMedium)
@@ -87,16 +98,30 @@ class MainActivity : ComponentActivity() {
             }
 
             Spacer(modifier = Modifier.height(16.dp))
-            Text("Recent Trips:", style = MaterialTheme.typography.titleMedium)
+            
+            // The Map View
+            if (selectedTrip != null && selectedTrip!!.routePoints.isNotEmpty()) {
+                AndroidMap(trip = selectedTrip!!)
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+
+            Text("Recent Trips (Tap to view map):", style = MaterialTheme.typography.titleMedium)
             Spacer(modifier = Modifier.height(8.dp))
             
             LazyColumn(modifier = Modifier.fillMaxSize()) {
                 items(trips) { trip ->
-                    TripItem(trip = trip, onClassify = { newPurpose ->
-                        lifecycleScope.launch {
-                            db.tripDao().update(trip.copy(purpose = newPurpose))
+                    TripItem(
+                        trip = trip, 
+                        isSelected = selectedTrip?.id == trip.id,
+                        onClassify = { newPurpose ->
+                            lifecycleScope.launch {
+                                db.tripDao().update(trip.copy(purpose = newPurpose))
+                            }
+                        },
+                        onClick = { 
+                            selectedTrip = if (selectedTrip?.id == trip.id) null else trip 
                         }
-                    })
+                    )
                     HorizontalDivider()
                 }
             }
@@ -104,9 +129,44 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
-    fun TripItem(trip: Trip, onClassify: (String) -> Unit) {
-        Column(modifier = Modifier.padding(vertical = 8.dp)) {
-            Text("Date: ${dateFormat.format(Date(trip.startTime))}")
+    fun AndroidMap(trip: Trip) {
+        val context = LocalContext.current
+        AndroidView(
+            factory = { ctx ->
+                Configuration.getInstance().userAgentValue = ctx.packageName
+                val mapView = MapView(ctx)
+                mapView.setTileSource(TileSourceFactory.MAPNIK)
+                mapView.setMultiTouchControls(true)
+                
+                val points = trip.routePoints.split(";").mapNotNull { pointStr ->
+                    val parts = pointStr.split(",")
+                    if (parts.size == 2) {
+                        GeoPoint(parts[0].toDouble(), parts[1].toDouble())
+                    } else null
+                }
+
+                if (points.isNotEmpty()) {
+                    val line = Polyline()
+                    line.setPoints(points)
+                    mapView.overlays.add(line)
+                    
+                    val bounds = org.osmdroid.util.BoundingBox.fromGeoPoints(points)
+                    mapView.zoomToBoundingBox(bounds.increaseByScale(1.2f), false)
+                }
+                mapView
+            },
+            modifier = Modifier.fillMaxWidth().height(300.dp)
+        )
+    }
+
+    @Composable
+    fun TripItem(trip: Trip, isSelected: Boolean, onClassify: (String) -> Unit, onClick: () -> Unit) {
+        Column(
+            modifier = Modifier
+                .padding(vertical = 8.dp)
+                .clickable { onClick() }
+        ) {
+            Text("Date: ${dateFormat.format(Date(trip.startTime))}", fontWeight = if(isSelected) androidx.compose.ui.text.font.FontWeight.Bold else androidx.compose.ui.text.font.FontWeight.Normal)
             Text("Distance: ${trip.distanceMiles} miles")
             Text("Purpose: ${trip.purpose}", color = if (trip.purpose == "Business") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
             
