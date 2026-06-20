@@ -1,6 +1,7 @@
 package com.personal.mileagetracker
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.*
 import android.content.*
 import android.content.pm.PackageManager
@@ -9,6 +10,7 @@ import android.os.*
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import androidx.room.Room
 import com.google.android.gms.location.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -29,7 +31,7 @@ class TrackingService : Service() {
     private val activityReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             if (ActivityRecognitionResult.hasResult(intent)) {
-                val result = ActivityRecognitionResult.extractResult(intent)
+                val result = ActivityRecognitionResult.extractResult(intent) ?: return
                 val activity = result.mostProbableActivity
 
                 when (activity.type) {
