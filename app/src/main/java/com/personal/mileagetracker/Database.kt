@@ -14,7 +14,8 @@ data class Trip(
     val endLng: Double,
     val distanceMiles: Double,
     val purpose: String = "Personal",
-    val notes: String = ""
+    val notes: String = "",
+    val routePoints: String = "" // New field to store the full route
 )
 
 @Dao
@@ -29,7 +30,7 @@ interface TripDao {
     fun getAllTrips(): Flow<List<Trip>>
 }
 
-@Database(entities = [Trip::class], version = 1, exportSchema = false)
+@Database(entities = [Trip::class], version = 2, exportSchema = false) // Updated version to 2
 abstract class AppDatabase : RoomDatabase() {
     abstract fun tripDao(): TripDao
 }
